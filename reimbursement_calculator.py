@@ -285,7 +285,7 @@ def compute_claim_summary() -> dict:
     }
 
 
-def fill_travel_forms(output_path: str | Path | None = None) -> str:
+def fill_travel_forms(output_path: str | Path | None = None, approval_workflow: list[dict] | None = None) -> str:
     summary = compute_claim_summary()
     root = ROOT
     template_path = root / "Travel_Expense_Forms_Template.xlsx"
@@ -326,36 +326,20 @@ def fill_travel_forms(output_path: str | Path | None = None) -> str:
     request_ws["D25"] = "=SUM(D20:D24)"
     request_ws["D27"] = summary["approved_advance"]
 
-    request_ws["B31"] = "1"
-    request_ws["C31"] = "Reporting Manager"
-    request_ws["D31"] = "Suresh Iyer"
-    request_ws["E31"] = "Approved"
-    request_ws["F31"] = "08-Jun-2026"
-    request_ws["G31"] = "Approved as per policy"
-    request_ws["B32"] = "2"
-    request_ws["C32"] = "Head of Department"
-    request_ws["D32"] = "Meera Krishnan"
-    request_ws["E32"] = "Approved"
-    request_ws["F32"] = "08-Jun-2026"
-    request_ws["G32"] = "Approved as per policy"
-    request_ws["B33"] = "3"
-    request_ws["C33"] = "Head of Division"
-    request_ws["D33"] = ""
-    request_ws["E33"] = ""
-    request_ws["F33"] = ""
-    request_ws["G33"] = ""
-    request_ws["B34"] = "4"
-    request_ws["C34"] = "Finance"
-    request_ws["D34"] = ""
-    request_ws["E34"] = ""
-    request_ws["F34"] = ""
-    request_ws["G34"] = ""
-    request_ws["B35"] = "5"
-    request_ws["C35"] = "MD / CEO (if > policy limit)"
-    request_ws["D35"] = ""
-    request_ws["E35"] = ""
-    request_ws["F35"] = ""
-    request_ws["G35"] = ""
+    workflow = approval_workflow or [
+        {"role": "Reporting Manager", "name": "Suresh Iyer", "decision": "Pending", "date": "", "remarks": "Awaiting review"},
+        {"role": "Head of Department", "name": "Meera Krishnan", "decision": "Pending", "date": "", "remarks": "Awaiting reporting manager approval"},
+        {"role": "Finance - verification", "name": "Ravi Menon", "decision": "Pending", "date": "", "remarks": "Awaiting HOD approval"},
+        {"role": "Finance - payment released", "name": "Finance Shared Services", "decision": "Pending", "date": "", "remarks": "Awaiting finance verification"},
+    ]
+    for offset, item in enumerate(workflow, 1):
+        row = 30 + offset
+        request_ws.cell(row=row, column=2, value=str(offset))
+        request_ws.cell(row=row, column=3, value=item["role"])
+        request_ws.cell(row=row, column=4, value=item["name"])
+        request_ws.cell(row=row, column=5, value=item["decision"])
+        request_ws.cell(row=row, column=6, value=item["date"])
+        request_ws.cell(row=row, column=7, value=item["remarks"])
 
     settlement_ws["C5"] = summary["travel_request_id"]
     settlement_ws["C6"] = summary["employee_name"]
@@ -410,34 +394,18 @@ def fill_travel_forms(output_path: str | Path | None = None) -> str:
 
     settlement_ws["B54"] = "1"
     settlement_ws["C54"] = "Employee (submitted by)"
-    settlement_ws["D54"] = "Chaitanya Reddy"
+    settlement_ws["D54"] = summary["employee_name"]
     settlement_ws["E54"] = "Submitted"
     settlement_ws["F54"] = "20-Jun-2026"
     settlement_ws["G54"] = "Claim submitted within policy deadline"
-    settlement_ws["B55"] = "2"
-    settlement_ws["C55"] = "Reporting Manager"
-    settlement_ws["D55"] = "Suresh Iyer"
-    settlement_ws["E55"] = "Approved"
-    settlement_ws["F55"] = "08-Jun-2026"
-    settlement_ws["G55"] = "Approved as per policy"
-    settlement_ws["B56"] = "3"
-    settlement_ws["C56"] = "Head of Department"
-    settlement_ws["D56"] = "Meera Krishnan"
-    settlement_ws["E56"] = "Approved"
-    settlement_ws["F56"] = "08-Jun-2026"
-    settlement_ws["G56"] = "Approved as per policy"
-    settlement_ws["B57"] = "4"
-    settlement_ws["C57"] = "Finance - verification"
-    settlement_ws["D57"] = "Ravi Menon"
-    settlement_ws["E57"] = "Verified"
-    settlement_ws["F57"] = "20-Jun-2026"
-    settlement_ws["G57"] = "Claim checked against supporting bills"
-    settlement_ws["B58"] = "5"
-    settlement_ws["C58"] = "Finance - payment released"
-    settlement_ws["D58"] = ""
-    settlement_ws["E58"] = ""
-    settlement_ws["F58"] = ""
-    settlement_ws["G58"] = "Payment to be processed in next payment run"
+    for offset, item in enumerate(workflow, 2):
+        row = 52 + offset
+        settlement_ws.cell(row=row, column=2, value=str(offset))
+        settlement_ws.cell(row=row, column=3, value=item["role"])
+        settlement_ws.cell(row=row, column=4, value=item["name"])
+        settlement_ws.cell(row=row, column=5, value=item["decision"])
+        settlement_ws.cell(row=row, column=6, value=item["date"])
+        settlement_ws.cell(row=row, column=7, value=item["remarks"])
 
     workbook.save(target_path)
     return str(target_path)

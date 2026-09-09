@@ -150,13 +150,22 @@ The tests cover the policy-based claim totals and successful workbook generation
 - Hotel extras and unsupported business entertainment are treated as disallowed expenses.
 - The supplied email text is the fallback source when OCR dependencies or the Tesseract executable are unavailable.
 
-## Deliberately Out Of Scope
+## Approval Workflow And Demo Scope
 
-This is a focused take-home implementation and does not currently include:
+The web UI includes a sequential approval flow:
+
+- Employee submission is recorded first.
+- Reporting Manager must approve before HOD review is enabled.
+- HOD must approve before Finance verification is enabled.
+- Finance verification must complete before payment release is enabled.
+- The employee can revisit the Overview and Approvals pages to see the current state.
+
+The hosted demo uses in-process state because no production database or identity provider is configured. It is suitable for the supplied sample claim and review demonstration; Vercel may reset state when a serverless instance is recycled. A production deployment should connect these actions to durable storage and authenticated user identities.
+
+The following remain out of scope:
 
 - Automatic scanning and classification of arbitrary email inboxes.
 - Multiple employees or multiple trips in one run.
-- A web interface or REST API.
 - Database persistence, user accounts, or approval notifications.
 - Cloud OCR or production document-management integration.
 - Human review screens for ambiguous OCR results.

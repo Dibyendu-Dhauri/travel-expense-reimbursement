@@ -3,12 +3,38 @@ from __future__ import annotations
 from html import escape
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, Response
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from reimbursement_calculator import compute_claim_summary, fill_travel_forms
 
 app = FastAPI(title="Nortex Travel Expense Reimbursement")
+
+APPROVALS = {
+    "manager": {"role": "Reporting Manager", "name": "Suresh Iyer", "decision": "Pending", "date": "", "remarks": "Awaiting review"},
+    "hod": {"role": "Head of Department", "name": "Meera Krishnan", "decision": "Pending", "date": "", "remarks": "Awaiting reporting manager approval"},
+    "finance": {"role": "Finance - verification", "name": "Ravi Menon", "decision": "Pending", "date": "", "remarks": "Awaiting HOD approval"},
+    "payment": {"role": "Finance - payment released", "name": "Finance Shared Services", "decision": "Pending", "date": "", "remarks": "Awaiting finance verification"},
+}
+
+ROLE_ACCESS = {"manager": "manager", "hod": "hod", "finance": "finance", "payment": "payment"}
+
+
+def _next_pending() -> str | None:
+    if any(item["decision"] == "Rejected" for item in APPROVALS.values()):
+        return None
+    for key in ("manager", "hod", "finance", "payment"):
+        if APPROVALS[key]["decision"] == "Pending":
+            return key
+    return None
+
+
+def _workflow_rows() -> list[dict]:
+    return [{"role": "Employee (submitted by)", "name": "Chaitanya Reddy", "decision": "Submitted", "date": "20-Jun-2026", "remarks": "Claim submitted within policy deadline", "state": "approved"}] + [{**item, "key": key, "state": "approved" if item["decision"] in {"Approved", "Verified", "Released"} else "pending"} for key, item in APPROVALS.items()]
+
+
+def _approval_items() -> list[dict]:
+    return [APPROVALS[key] for key in ("manager", "hod", "finance", "payment")]
 
 
 def _money(value: float) -> str:
@@ -47,11 +73,40 @@ def expenses() -> str:
 
 
 @app.get("/approvals", response_class=HTMLResponse)
-def approvals() -> str:
-    rows = [("Employee", "Chaitanya Reddy", "Submitted", "20-Jun-2026", "Claim submitted within policy deadline", "approved"), ("Reporting Manager", "Suresh Iyer", "Approved", "08-Jun-2026", "Approved as per policy", "approved"), ("Head of Department", "Meera Krishnan", "Approved", "08-Jun-2026", "Approved as per policy", "approved"), ("Finance verification", "Ravi Menon", "Verified", "20-Jun-2026", "Claim checked against supporting bills", "verified"), ("Finance payment release", "Pending", "Pending", "", "Payment to be processed in next payment run", "pending")]
-    table = "".join(f"<tr><td>{i}</td><td><strong>{role}</strong><br><span class='muted'>{name}</span></td><td><span class='status {state}'>{decision}</span></td><td>{date or '—'}</td><td class='muted'>{remark}</td></tr>" for i,(role,name,decision,date,remark,state) in enumerate(rows,1))
-    content = f"<div class='top'><div><div class='eyebrow'>Workflow</div><h1>Approval & finance processing</h1><p>Track the claim from employee submission through payment release.</p></div><a class='button' href='/download'>↓ Download form</a></div><section class='section'><table><thead><tr><th>Level</th><th>Role / owner</th><th>Decision</th><th>Date</th><th>Remarks</th></tr></thead><tbody>{table}</tbody></table></section><section class='section'><h2>Current state</h2><p><span class='status pending'>Awaiting finance payment release</span> The claim has passed manager, HOD, and finance verification steps.</p></section>"
+def approvals(request: Request) -> str:
+    selected_role = request.query_params.get("role", "manager")
+    selected_role = selected_role if selected_role in ROLE_ACCESS else "manager"
+    rows = _workflow_rows()
+    table = "".join(f"<tr><td>{i}</td><td><strong>{escape(row['role'])}</strong><br><span class='muted'>{escape(row['name'])}</span></td><td><span class='status {row['state']}'>{escape(row['decision'])}</span></td><td>{escape(row['date'] or '—')}</td><td class='muted'>{escape(row['remarks'])}</td></tr>" for i, row in enumerate(rows, 1))
+    next_key = _next_pending()
+    action = ""
+    rejected = any(item["decision"] == "Rejected" for item in APPROVALS.values())
+    if rejected:
+        action = "<section class='section'><h2>Claim rejected</h2><p><span class='status rejected'>Rejected</span> The workflow is stopped. The employee must correct and resubmit the claim.</p></section>"
+    elif next_key:
+        item = APPROVALS[next_key]
+        action = f"<section class='section'><h2>Reviewer action</h2><p><strong>{escape(item['role'])}</strong> · signed in as <strong>{escape(item['name'])}</strong></p><p class='muted' style='margin-top:8px'>{escape(item['remarks'])}</p><form method='post' action='/approvals/action?role={next_key}&decision=approve' style='display:inline'><button class='button' type='submit'>Approve / verify</button></form><form method='post' action='/approvals/action?role={next_key}&decision=reject' style='display:inline;margin-left:8px'><button class='button danger' type='submit'>Reject claim</button></form></section>"
+    else:
+        action = "<section class='section'><h2>Workflow complete</h2><p><span class='status approved'>Released</span> All approval stages are complete.</p></section>"
+    content = f"<div class='top'><div><div class='eyebrow'>Workflow</div><h1>Approval & finance processing</h1><p>Each reviewer must take an action before the next stage becomes available.</p></div><a class='button' href='/download'>↓ Download form</a></div><section class='section'><p class='label'>Reviewer view</p><p style='margin-top:5px'><a href='/approvals?role=manager'>Manager</a> · <a href='/approvals?role=hod'>HOD</a> · <a href='/approvals?role=finance'>Finance</a> · <a href='/approvals?role=payment'>Payment</a></p></section><section class='section'><table><thead><tr><th>Level</th><th>Role / owner</th><th>Decision</th><th>Date</th><th>Remarks</th></tr></thead><tbody>{table}</tbody></table></section>{action}"
     return _layout("Approvals", "approvals", content)
+
+
+@app.post("/approvals/action")
+def approval_action(request: Request) -> RedirectResponse:
+    role = request.query_params.get("role", "")
+    decision = request.query_params.get("decision", "")
+    if role not in APPROVALS or role != _next_pending() or decision not in {"approve", "reject"}:
+        return RedirectResponse("/approvals", status_code=303)
+    item = APPROVALS[role]
+    item["decision"] = "Approved" if decision == "approve" else "Rejected"
+    item["date"] = "09-Sep-2026"
+    item["remarks"] = "Approved after expense and evidence review" if decision == "approve" else "Rejected by assigned reviewer"
+    if decision == "reject":
+        for later in APPROVALS.values():
+            if later["decision"] == "Pending":
+                later["remarks"] = "Blocked by rejected approval"
+    return RedirectResponse("/approvals", status_code=303)
 
 
 @app.get("/evidence", response_class=HTMLResponse)
@@ -65,5 +120,5 @@ def evidence() -> str:
 @app.get("/download")
 def download() -> Response:
     output = Path("/tmp/filled_travel_forms.xlsx")
-    fill_travel_forms(output)
+    fill_travel_forms(output, approval_workflow=_approval_items())
     return Response(output.read_bytes(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=filled_travel_forms.xlsx"})
