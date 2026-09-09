@@ -127,7 +127,7 @@ npx vercel login
 npx vercel --prod
 ```
 
-The deployed URL responds to `GET /api` with the calculated claim summary. Use `GET /api?download=1` to download a freshly generated `filled_travel_forms.xlsx` workbook.
+The deployed URL responds to `GET /api` by downloading a freshly generated `filled_travel_forms.xlsx` workbook. This is the only link needed for a reviewer to test the application.
 
 Vercel's runtime filesystem is temporary, so the hosted function returns the workbook as a download and does not persist it between requests. Tesseract must also be available in the deployment environment for image OCR; otherwise the existing email-text fallback is used.
 
