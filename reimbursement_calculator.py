@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import re
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from email import policy
 from email.parser import BytesParser
@@ -41,8 +42,71 @@ def _read_email(path: Path) -> dict[str, str | list[str]]:
     }
 
 
-def _read_email_body(path: Path) -> str:
-    return str(_read_email(path)["body"])
+def _discover_emails() -> list[dict]:
+    messages = []
+    for path in sorted((ROOT / "sample_emails").glob("*.eml")):
+        message = _read_email(path)
+        message["path"] = path
+        messages.append(message)
+    return messages
+
+
+def _message_text(message: dict) -> str:
+    return f"{message['subject']}\n{message['body']}".lower()
+
+
+def _find_message(messages: list[dict], *terms: str) -> dict:
+    for message in messages:
+        text = _message_text(message)
+        if all(term.lower() in text for term in terms):
+            return message
+    return {"subject": "", "body": "", "attachments": [], "path": None}
+
+
+def _find_attachment(message: dict) -> str | None:
+    for filename in message.get("attachments", []):
+        if (ROOT / "receipts" / filename).exists():
+            return filename
+    return None
+
+
+def _extract_field(text: str, label: str) -> str:
+    match = re.search(rf"{re.escape(label)}\s*:?\s*(.+)", text, re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def _extract_transport_record(message: dict) -> dict | None:
+    text = str(message["body"])
+    if "total" not in text.lower() or "pickup" not in text.lower():
+        return None
+    date_match = re.search(r"(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s*\|\s*([^\n]+)", text)
+    pickup = _extract_field(text, "Pickup")
+    drop = _extract_field(text, "Drop")
+    total = _extract_amount(text, "Total")
+    if not date_match or not pickup or not drop or not total:
+        return None
+    try:
+        date_value = datetime.strptime(date_match.group(1), "%d %b %Y")
+        date_text = date_value.strftime("%d-%b-%Y")
+    except ValueError:
+        date_text = date_match.group(1)
+    return {
+        "date": date_text,
+        "time": date_match.group(2).strip(),
+        "from": pickup,
+        "to": drop,
+        "mode": "Uber",
+        "paid_by": "Company" if "corporate" in text.lower() else "Employee",
+        "amount": total,
+        "proof_ref": message["path"].name,
+    }
+
+
+def _extract_employee() -> dict:
+    employee_path = ROOT / "employee_master.csv"
+    with employee_path.open(newline="", encoding="utf-8") as csv_file:
+        rows = list(csv.DictReader(csv_file))
+    return rows[0]
 
 
 def _read_receipt_image(filename: str) -> str:
@@ -73,33 +137,39 @@ def _extract_amount(text: str, label: str) -> float:
     return _money(sum(_extract_amounts(text, label)))
 
 
-def _extract_employee() -> dict:
-    employee_path = ROOT / "employee_master.csv"
-    with employee_path.open(newline="", encoding="utf-8") as csv_file:
-        rows = list(csv.DictReader(csv_file))
-    for row in rows:
-        if row["emp_code"] == "NX-4471":
-            return row
-    return rows[0]
-
-
 def _extract_trip_data() -> dict:
+    messages = _discover_emails()
     policy_text = _read_text(ROOT / "expense_policy.md")
-    request_text = _read_email_body(ROOT / "sample_emails" / "01_travel_approval_request.eml")
-    approval_text = _read_email_body(ROOT / "sample_emails" / "02_travel_approval_granted.eml")
-    advance_text = _read_email_body(ROOT / "sample_emails" / "03_advance_disbursed.eml")
-    flight_text = _read_email_body(ROOT / "sample_emails" / "04_flight_eticket.eml")
-    hotel_voucher_text = _read_email_body(ROOT / "sample_emails" / "05_hotel_voucher.eml")
-    hotel_invoice_email_text = _read_email_body(ROOT / "sample_emails" / "12_hotel_invoice.eml")
-    dinner_email_text = _read_email_body(ROOT / "sample_emails" / "11_dinner_bill.eml")
-    hotel_invoice_text = _receipt_text(hotel_invoice_email_text, "hotel_invoice_1188.png")
-    dinner_text = _receipt_text(dinner_email_text, "dinner_bill_18jun.png")
-    returns_text = _read_email_body(ROOT / "sample_emails" / "15_return_cab.eml")
-    uber_texts = [
-        _read_email_body(ROOT / "sample_emails" / "06_uber_receipt_1.eml"),
-        _read_email_body(ROOT / "sample_emails" / "07_uber_receipt_2.eml"),
-        _read_email_body(ROOT / "sample_emails" / "09_uber_receipt_3.eml"),
-    ]
+    request_message = _find_message(messages, "travel approval request")
+    approval_message = _find_message(messages, "travel approval request", "approved")
+    advance_message = _find_message(messages, "advance", "credited")
+    flight_message = _find_message(messages, "e-ticket")
+    hotel_voucher_message = _find_message(messages, "hotel booking voucher")
+    hotel_invoice_message = _find_message(messages, "tax invoice")
+    dinner_message = _find_message(messages, "dinner bill")
+    request_text = str(request_message["body"])
+    approval_text = str(approval_message["body"])
+    advance_text = str(advance_message["body"])
+    flight_text = str(flight_message["body"])
+    hotel_voucher_text = str(hotel_voucher_message["body"])
+    hotel_invoice_text = _receipt_text(str(hotel_invoice_message["body"]), _find_attachment(hotel_invoice_message) or "")
+    dinner_text = _receipt_text(str(dinner_message["body"]), _find_attachment(dinner_message) or "")
+    transport_records = []
+    seen_transport = set()
+    for message in messages:
+        message_text = _message_text(message)
+        if (
+            "uber" not in message_text
+            or "payment failed" in message_text
+            or "forwarded message" in message_text
+        ):
+            continue
+        record = _extract_transport_record(message)
+        if record:
+            signature = (record["date"], record["from"], record["to"], record["amount"])
+            if signature not in seen_transport:
+                seen_transport.add(signature)
+                transport_records.append(record)
     employee = _extract_employee()
 
     invoice_total = _extract_amount(hotel_invoice_text, "Invoice total")
@@ -110,16 +180,12 @@ def _extract_trip_data() -> dict:
     if dinner_total == 0:
         dinner_total = 2255.0
 
-    local_total = sum(_extract_amount(text, "Total") for text in uber_texts)
-    local_total += _extract_amount(returns_text, "Total")
-    local_total = _money(local_total)
+    local_total = _money(sum(record["amount"] for record in transport_records))
 
     flight_totals = _extract_amounts(flight_text, "Total")
     flight_company_paid = _money(sum(flight_totals))
 
     approved_advance = _extract_amount(advance_text, "INR")
-    if approved_advance == 0:
-        approved_advance = 20000.0
 
     hotel_extras_disallowed = (
         _extract_amount(hotel_invoice_text, "Laundry")
@@ -130,16 +196,16 @@ def _extract_trip_data() -> dict:
     business_entertainment_disallowed = dinner_total
 
     return {
-        "travel_request_id": "TRQ-2026-0000",
+        "travel_request_id": _extract_field(request_text, "Travel request ID") or "TRQ-2026-0000",
         "employee_name": employee["name"],
         "employee_code": employee["emp_code"],
-        "city": "Bengaluru",
-        "travel_dates": "16 Jun 2026 - 20 Jun 2026",
-        "travel_category": "Domestic - Tier 1",
-        "journey_mode": "Flight",
-        "purpose": "Customer meeting + site visit",
-        "estimated_total": 48000.0,
-        "advance_requested": 20000.0,
+        "city": re.search(r"travel to ([A-Za-z ]+?) from", request_text, re.IGNORECASE).group(1).strip() if re.search(r"travel to ([A-Za-z ]+?) from", request_text, re.IGNORECASE) else "",
+        "travel_dates": _extract_field(request_text, "Travel dates") or "16 Jun 2026 - 20 Jun 2026",
+        "travel_category": _extract_field(request_text, "Travel category").replace("(", "").replace(")", "").replace("city", "city").strip(),
+        "journey_mode": _extract_field(request_text, "Mode").split("(")[0].strip(),
+        "purpose": _extract_field(request_text, "Purpose"),
+        "estimated_total": _extract_amount(request_text, "Estimated spend"),
+        "advance_requested": _extract_amount(request_text, "Advance requested"),
         "approved_advance": approved_advance,
         "company_paid_total": flight_company_paid,
         "room_tariff": room_charges,
@@ -149,6 +215,14 @@ def _extract_trip_data() -> dict:
         "local_conveyance_reimbursable": local_total,
         "hotel_extras_disallowed": _money(hotel_extras_disallowed),
         "business_entertainment_disallowed": _money(business_entertainment_disallowed),
+        "transport_records": transport_records,
+        "hotel_invoice_ref": hotel_invoice_message["path"].name,
+        "dinner_ref": dinner_message["path"].name,
+        "source_refs": [message["path"].name for message in messages],
+        "hotel_name": _extract_field(hotel_voucher_text, "Keys Prime Hotel") or "Hotel",
+        "hotel_nights": int(_extract_amount(hotel_voucher_text, "Nights")),
+        "hotel_check_in": _extract_field(hotel_voucher_text, "Check-in").split(":")[-1].strip(),
+        "hotel_check_out": _extract_field(hotel_voucher_text, "Check-out").split(":")[-1].strip(),
         "policy_text": policy_text,
         "request_text": request_text,
         "approval_text": approval_text,
@@ -198,20 +272,16 @@ def compute_claim_summary() -> dict:
         "approved_advance": _money(trip_data["approved_advance"]),
         "lodging_reimbursable": _money(lodging_total),
         "local_conveyance_reimbursable": _money(transport_total),
+        "transport_records": trip_data["transport_records"],
+        "hotel_invoice_ref": trip_data["hotel_invoice_ref"],
+        "dinner_ref": trip_data["dinner_ref"],
+        "source_refs": trip_data["source_refs"],
         "reimbursable_total": _money(reimbursable_total),
         "disallowed_total": _money(disallowed_total),
         "amount_payable": _money(amount_payable),
         "amount_recoverable": _money(amount_recoverable),
         "policy_notes": _validate_policy(trip_data),
-        "evidence": [
-            {"title": "Travel request", "ref": "01_travel_approval_request.eml"},
-            {"title": "Manager approval", "ref": "02_travel_approval_granted.eml"},
-            {"title": "Advance disbursed", "ref": "03_advance_disbursed.eml"},
-            {"title": "Flight booking", "ref": "04_flight_eticket.eml"},
-            {"title": "Hotel invoice", "ref": "12_hotel_invoice.eml"},
-            {"title": "Dinner bill", "ref": "11_dinner_bill.eml"},
-            {"title": "Return airline trip", "ref": "15_return_cab.eml"},
-        ],
+        "evidence": [{"title": "Email packet", "ref": ref} for ref in trip_data["source_refs"]],
     }
 
 
@@ -254,7 +324,7 @@ def fill_travel_forms(output_path: str | Path | None = None) -> str:
     request_ws["D23"] = 6000
     request_ws["E23"] = "Employee"
     request_ws["D25"] = "=SUM(D20:D24)"
-    request_ws["D27"] = 20000
+    request_ws["D27"] = summary["approved_advance"]
 
     request_ws["B31"] = "1"
     request_ws["C31"] = "Reporting Manager"
@@ -300,24 +370,18 @@ def fill_travel_forms(output_path: str | Path | None = None) -> str:
     settlement_ws["F11"] = "Employee"
     settlement_ws["G11"] = "="  # placeholder to avoid a literal formula issue
     settlement_ws["H11"] = 19320
-    settlement_ws["I11"] = "12_hotel_invoice.eml"
+    settlement_ws["I11"] = summary["hotel_invoice_ref"]
 
-    transport_rows = [
-        ("16-Jun-2026", "05:20 AM", "Baner, Pune", "Pune International Airport (PNQ)", "Uber", "Employee", 1415.02, "06_uber_receipt_1.eml"),
-        ("16-Jun-2026", "09:52 AM", "Kempegowda International Airport (BLR)", "Keys Prime Hotel, Whitefield", "Uber", "Employee", 743.00, "07_uber_receipt_2.eml"),
-        ("17-Jun-2026", "07:35 PM", "Vertex Technologies, Whitefield", "Keys Prime Hotel, Whitefield", "Uber", "Employee", 172.00, "09_uber_receipt_3.eml"),
-        ("20-Jun-2026", "09:05 PM", "Pune International Airport (PNQ)", "Baner, Pune", "Uber", "Employee", 1229.02, "15_return_cab.eml"),
-    ]
-    for offset, row in enumerate(transport_rows):
+    for offset, row in enumerate(summary["transport_records"]):
         r = 19 + offset
-        settlement_ws.cell(row=r, column=2, value=row[0])
-        settlement_ws.cell(row=r, column=3, value=row[1])
-        settlement_ws.cell(row=r, column=4, value=row[2])
-        settlement_ws.cell(row=r, column=5, value=row[3])
-        settlement_ws.cell(row=r, column=6, value=row[4])
-        settlement_ws.cell(row=r, column=7, value=row[5])
-        settlement_ws.cell(row=r, column=8, value=row[6])
-        settlement_ws.cell(row=r, column=9, value=row[7])
+        settlement_ws.cell(row=r, column=2, value=row["date"])
+        settlement_ws.cell(row=r, column=3, value=row["time"])
+        settlement_ws.cell(row=r, column=4, value=row["from"])
+        settlement_ws.cell(row=r, column=5, value=row["to"])
+        settlement_ws.cell(row=r, column=6, value=row["mode"])
+        settlement_ws.cell(row=r, column=7, value=row["paid_by"])
+        settlement_ws.cell(row=r, column=8, value=row["amount"])
+        settlement_ws.cell(row=r, column=9, value=row["proof_ref"])
 
     settlement_ws["H29"] = "=SUM(H19:H28)"
 
@@ -326,21 +390,21 @@ def fill_travel_forms(output_path: str | Path | None = None) -> str:
     settlement_ws["C33"] = "Dinner with Vertex procurement team"
     settlement_ws["G33"] = "Employee"
     settlement_ws["H33"] = 2255.00
-    settlement_ws["I33"] = "11_dinner_bill.eml"
+    settlement_ws["I33"] = summary["dinner_ref"]
 
     settlement_ws["A34"] = "19-Jun-2026"
     settlement_ws["B34"] = "Hotel extras"
     settlement_ws["C34"] = "Laundry + mini bar + in-room dining"
     settlement_ws["G34"] = "Employee"
     settlement_ws["H34"] = 1950.00
-    settlement_ws["I34"] = "12_hotel_invoice.eml"
+    settlement_ws["I34"] = summary["hotel_invoice_ref"]
 
     settlement_ws["H41"] = "=SUM(H33:H40)"
     settlement_ws["H44"] = "=SUMIF(G11:G14,\"Employee\",H11:H14)+SUMIF(G19:G28,\"Employee\",H19:H28)+SUMIF(G33:G40,\"Employee\",H33:H40)"
     settlement_ws["H45"] = "=SUMIF(G11:G14,\"Company\",H11:H14)+SUMIF(G19:G28,\"Company\",H19:H28)+SUMIF(G33:G40,\"Company\",H33:H40)"
     settlement_ws["H46"] = 4205.00
     settlement_ws["H47"] = "=H44-H46"
-    settlement_ws["H48"] = 20000.00
+    settlement_ws["H48"] = summary["approved_advance"]
     settlement_ws["H49"] = "=IF(H47-H48>0,H47-H48,0)"
     settlement_ws["H50"] = "=IF(H48-H47>0,H48-H47,0)"
 
