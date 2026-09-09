@@ -40,3 +40,4 @@ dist/
 filled_travel_forms.xlsx
 generated/
 .vercel/
+.walkthrough_frames/

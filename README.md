@@ -141,6 +141,13 @@ PYTHONPATH=. pytest -q
 
 The tests cover the policy-based claim totals and successful workbook generation.
 
+## Walkthrough Video
+
+The repository includes a short visual walkthrough and narration guide:
+
+- `project_walkthrough.mp4`
+- `WALKTHROUGH_SCRIPT.md`
+
 ## Design Decisions And Assumptions
 
 - The supplied packet describes one known employee and one known trip, so the current implementation uses the packet's specific message files and employee code `NX-4471`.
