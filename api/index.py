@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 from html import escape
 from pathlib import Path
 
@@ -10,31 +14,55 @@ from reimbursement_calculator import compute_claim_summary, fill_travel_forms
 
 app = FastAPI(title="Nortex Travel Expense Reimbursement")
 
-APPROVALS = {
+DEFAULT_APPROVALS = {
     "manager": {"role": "Reporting Manager", "name": "Suresh Iyer", "decision": "Pending", "date": "", "remarks": "Awaiting review"},
     "hod": {"role": "Head of Department", "name": "Meera Krishnan", "decision": "Pending", "date": "", "remarks": "Awaiting reporting manager approval"},
     "finance": {"role": "Finance - verification", "name": "Ravi Menon", "decision": "Pending", "date": "", "remarks": "Awaiting HOD approval"},
     "payment": {"role": "Finance - payment released", "name": "Finance Shared Services", "decision": "Pending", "date": "", "remarks": "Awaiting finance verification"},
 }
 
+COOKIE_NAME = "nortex_approval_state"
+COOKIE_SECRET = b"nortex-demo-approval-secret"
+
 ROLE_ACCESS = {"manager": "manager", "hod": "hod", "finance": "finance", "payment": "payment"}
 
 
-def _next_pending() -> str | None:
-    if any(item["decision"] == "Rejected" for item in APPROVALS.values()):
+def _load_approvals(request: Request) -> dict:
+    encoded = request.cookies.get(COOKIE_NAME, "")
+    try:
+        payload, signature = encoded.rsplit(".", 1)
+        expected = hmac.new(COOKIE_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            raise ValueError
+        stored = json.loads(base64.urlsafe_b64decode(payload.encode()).decode())
+        if set(stored) != set(DEFAULT_APPROVALS):
+            raise ValueError
+        return stored
+    except (ValueError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+        return json.loads(json.dumps(DEFAULT_APPROVALS))
+
+
+def _approval_cookie(approvals: dict) -> str:
+    payload = base64.urlsafe_b64encode(json.dumps(approvals, separators=(",", ":")).encode()).decode()
+    signature = hmac.new(COOKIE_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{signature}"
+
+
+def _next_pending(approvals: dict) -> str | None:
+    if any(item["decision"] == "Rejected" for item in approvals.values()):
         return None
     for key in ("manager", "hod", "finance", "payment"):
-        if APPROVALS[key]["decision"] == "Pending":
+        if approvals[key]["decision"] == "Pending":
             return key
     return None
 
 
-def _workflow_rows() -> list[dict]:
-    return [{"role": "Employee (submitted by)", "name": "Chaitanya Reddy", "decision": "Submitted", "date": "20-Jun-2026", "remarks": "Claim submitted within policy deadline", "state": "approved"}] + [{**item, "key": key, "state": "approved" if item["decision"] in {"Approved", "Verified", "Released"} else "pending"} for key, item in APPROVALS.items()]
+def _workflow_rows(approvals: dict) -> list[dict]:
+    return [{"role": "Employee (submitted by)", "name": "Chaitanya Reddy", "decision": "Submitted", "date": "20-Jun-2026", "remarks": "Claim submitted within policy deadline", "state": "approved"}] + [{**item, "key": key, "state": "approved" if item["decision"] in {"Approved", "Verified", "Released"} else "pending"} for key, item in approvals.items()]
 
 
-def _approval_items() -> list[dict]:
-    return [APPROVALS[key] for key in ("manager", "hod", "finance", "payment")]
+def _approval_items(approvals: dict) -> list[dict]:
+    return [approvals[key] for key in ("manager", "hod", "finance", "payment")]
 
 
 def _money(value: float) -> str:
@@ -74,17 +102,18 @@ def expenses() -> str:
 
 @app.get("/approvals", response_class=HTMLResponse)
 def approvals(request: Request) -> str:
+    approvals_state = _load_approvals(request)
     selected_role = request.query_params.get("role", "manager")
     selected_role = selected_role if selected_role in ROLE_ACCESS else "manager"
-    rows = _workflow_rows()
+    rows = _workflow_rows(approvals_state)
     table = "".join(f"<tr><td>{i}</td><td><strong>{escape(row['role'])}</strong><br><span class='muted'>{escape(row['name'])}</span></td><td><span class='status {row['state']}'>{escape(row['decision'])}</span></td><td>{escape(row['date'] or '—')}</td><td class='muted'>{escape(row['remarks'])}</td></tr>" for i, row in enumerate(rows, 1))
-    next_key = _next_pending()
+    next_key = _next_pending(approvals_state)
     action = ""
-    rejected = any(item["decision"] == "Rejected" for item in APPROVALS.values())
+    rejected = any(item["decision"] == "Rejected" for item in approvals_state.values())
     if rejected:
         action = "<section class='section'><h2>Claim rejected</h2><p><span class='status rejected'>Rejected</span> The workflow is stopped. The employee must correct and resubmit the claim.</p></section>"
     elif next_key:
-        item = APPROVALS[next_key]
+        item = approvals_state[next_key]
         action = f"<section class='section'><h2>Reviewer action</h2><p><strong>{escape(item['role'])}</strong> · signed in as <strong>{escape(item['name'])}</strong></p><p class='muted' style='margin-top:8px'>{escape(item['remarks'])}</p><form method='post' action='/approvals/action?role={next_key}&decision=approve' style='display:inline'><button class='button' type='submit'>Approve / verify</button></form><form method='post' action='/approvals/action?role={next_key}&decision=reject' style='display:inline;margin-left:8px'><button class='button danger' type='submit'>Reject claim</button></form></section>"
     else:
         action = "<section class='section'><h2>Workflow complete</h2><p><span class='status approved'>Released</span> All approval stages are complete.</p></section>"
@@ -94,19 +123,22 @@ def approvals(request: Request) -> str:
 
 @app.post("/approvals/action")
 def approval_action(request: Request) -> RedirectResponse:
+    approvals_state = _load_approvals(request)
     role = request.query_params.get("role", "")
     decision = request.query_params.get("decision", "")
-    if role not in APPROVALS or role != _next_pending() or decision not in {"approve", "reject"}:
+    if role not in approvals_state or role != _next_pending(approvals_state) or decision not in {"approve", "reject"}:
         return RedirectResponse("/approvals", status_code=303)
-    item = APPROVALS[role]
+    item = approvals_state[role]
     item["decision"] = "Approved" if decision == "approve" else "Rejected"
     item["date"] = "09-Sep-2026"
     item["remarks"] = "Approved after expense and evidence review" if decision == "approve" else "Rejected by assigned reviewer"
     if decision == "reject":
-        for later in APPROVALS.values():
+        for later in approvals_state.values():
             if later["decision"] == "Pending":
                 later["remarks"] = "Blocked by rejected approval"
-    return RedirectResponse("/approvals", status_code=303)
+    response = RedirectResponse("/approvals", status_code=303)
+    response.set_cookie(COOKIE_NAME, _approval_cookie(approvals_state), httponly=True, samesite="lax", secure=request.url.scheme == "https", max_age=60 * 60 * 24 * 30)
+    return response
 
 
 @app.get("/evidence", response_class=HTMLResponse)
@@ -118,7 +150,7 @@ def evidence() -> str:
 
 
 @app.get("/download")
-def download() -> Response:
+def download(request: Request) -> Response:
     output = Path("/tmp/filled_travel_forms.xlsx")
-    fill_travel_forms(output, approval_workflow=_approval_items())
+    fill_travel_forms(output, approval_workflow=_approval_items(_load_approvals(request)))
     return Response(output.read_bytes(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=filled_travel_forms.xlsx"})

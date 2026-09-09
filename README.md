@@ -144,7 +144,7 @@ The tests cover the policy-based claim totals and successful workbook generation
 ## Design Decisions And Assumptions
 
 - The supplied packet describes one known employee and one known trip, so the current implementation uses the packet's specific message files and employee code `NX-4471`.
-- Email and image values are held in memory as Python dictionaries and strings while the script runs. There is no database.
+- Email and image values are held in memory as Python dictionaries and strings while the script runs. Approval state is stored in a signed browser cookie for the demo; there is no database.
 - The generated Excel workbook is the persistent output artifact.
 - Flight and hotel booking costs marked as company-paid are excluded from the employee reimbursement calculation.
 - Hotel extras and unsupported business entertainment are treated as disallowed expenses.
@@ -160,7 +160,7 @@ The web UI includes a sequential approval flow:
 - Finance verification must complete before payment release is enabled.
 - The employee can revisit the Overview and Approvals pages to see the current state.
 
-The hosted demo uses in-process state because no production database or identity provider is configured. It is suitable for the supplied sample claim and review demonstration; Vercel may reset state when a serverless instance is recycled. A production deployment should connect these actions to durable storage and authenticated user identities.
+The hosted demo stores approval state in a signed HttpOnly browser cookie, so refreshing the same browser preserves the workflow. This keeps the demo database-free, but it does not share state between different browsers or users. A production deployment should connect these actions to durable storage and authenticated user identities.
 
 The following remain out of scope:
 
