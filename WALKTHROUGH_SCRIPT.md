@@ -1,14 +1,14 @@
-# Project Walkthrough Script
+# Web UI Walkthrough Script
 
-Suggested length: 3 to 5 minutes.
+Suggested length: 3 to 5 minutes. The accompanying `web_ui_walkthrough.mp4` is a concise visual cut of the same flow.
 
 ## 1. Opening
 
-This application automates Nortex's travel expense reimbursement workflow. It reads a trip's email packet and receipts, validates expenses against policy, exposes the approval status, and generates the official Excel settlement form.
+This application is a reviewer-facing web UI for Nortex's travel expense reimbursement workflow. It reads a trip's email packet and receipts, validates expenses against policy, exposes the approval status, and generates the official Excel settlement form.
 
 ## 2. Overview page
 
-Open the hosted application and start on Overview. Point out the employee, travel request, destination, claim total, amount payable, disallowed expenses, and advance. Explain that the page is a review workspace, not just a calculator output.
+Open the hosted application and start on Overview. Point out the employee, travel request, destination, claim total, amount payable, disallowed expenses, advance, and policy findings. Explain that the page is a review workspace, not just a calculator output.
 
 ## 3. Expenses page
 
@@ -20,7 +20,7 @@ Open Evidence. Explain that the application parses `.eml` files with Python's st
 
 ## 5. Approval page
 
-Open Approvals. Show that the workflow starts pending. The Reporting Manager is the first available reviewer. Approve the stage and refresh the page. Explain that the next stage is then unlocked. Show the sequence: Manager, HOD, Finance verification, and Payment release. Rejecting a claim stops the chain.
+Open Approvals. Show that the workflow starts pending. The Reporting Manager is the first available reviewer and sees `Approve / verify` and `Reject` actions. Approve the stage and refresh the page. Explain that the manager's action is now visible and the HOD stage is unlocked. Show the sequence: Manager, HOD, Finance verification, and Payment release. Rejecting a claim stops the chain and requests resubmission.
 
 ## 6. Downloaded workbook
 

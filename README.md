@@ -146,6 +146,7 @@ The tests cover the policy-based claim totals and successful workbook generation
 The repository includes a short visual walkthrough and narration guide:
 
 - `project_walkthrough.mp4`
+- `web_ui_walkthrough.mp4`
 - `WALKTHROUGH_SCRIPT.md`
 
 ## Design Decisions And Assumptions
