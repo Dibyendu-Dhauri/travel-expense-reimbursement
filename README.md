@@ -2,9 +2,9 @@
 
 This project automates the travel expense settlement process described in `PROBLEM_STATEMENT.md`. It reads the supplied employee record, policy, email packet, and receipt evidence; calculates the claim; validates expenses against the policy; and fills the official Excel travel request and settlement forms.
 
-The implementation is intentionally a small, script-based application. The local workflow has no database, login flow, or frontend. Running `app.py` performs the complete workflow from extraction through workbook generation.
+The implementation is a lightweight web application backed by a script-friendly calculator. The browser interface provides claim review, expense review, approval tracking, evidence visibility, and workbook download. Running `app.py` still performs the complete local workflow from extraction through workbook generation.
 
-For hosted testing, the repository also includes a minimal Vercel function under `api/index.py`. This deployment surface is only an adapter around the existing calculator; the local CLI remains the primary workflow.
+For hosted testing, the repository includes a Vercel-compatible FastAPI application under `api/index.py`.
 
 ## Problem Solved
 
@@ -127,9 +127,9 @@ npx vercel login
 npx vercel --prod
 ```
 
-The deployed URL responds to `GET /api` by downloading a freshly generated `filled_travel_forms.xlsx` workbook. This is the only link needed for a reviewer to test the application.
+The deployed URL opens the browser review interface. Use the navigation to inspect the overview, expenses, approvals, and evidence. The `Download completed form` action generates `filled_travel_forms.xlsx`.
 
-Vercel's runtime filesystem is temporary, so the hosted function returns the workbook as a download and does not persist it between requests. Tesseract must also be available in the deployment environment for image OCR; otherwise the existing email-text fallback is used.
+Vercel's runtime filesystem is temporary, so the hosted function generates the workbook on demand and does not persist it between requests. Tesseract must also be available in the deployment environment for image OCR; otherwise the existing email-text fallback is used.
 
 ## Tests
 
