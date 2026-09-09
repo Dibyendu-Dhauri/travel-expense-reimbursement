@@ -39,3 +39,4 @@ dist/
 # Generated application output
 filled_travel_forms.xlsx
 generated/
+.vercel/

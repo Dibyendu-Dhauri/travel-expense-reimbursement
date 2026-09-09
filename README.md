@@ -2,7 +2,9 @@
 
 This project automates the travel expense settlement process described in `PROBLEM_STATEMENT.md`. It reads the supplied employee record, policy, email packet, and receipt evidence; calculates the claim; validates expenses against the policy; and fills the official Excel travel request and settlement forms.
 
-The implementation is intentionally a small, script-based application. There is no web server, API endpoint, database, login flow, or frontend. Running `app.py` performs the complete workflow from extraction through workbook generation.
+The implementation is intentionally a small, script-based application. The local workflow has no database, login flow, or frontend. Running `app.py` performs the complete workflow from extraction through workbook generation.
+
+For hosted testing, the repository also includes a minimal Vercel function under `api/index.py`. This deployment surface is only an adapter around the existing calculator; the local CLI remains the primary workflow.
 
 ## Problem Solved
 
@@ -115,6 +117,19 @@ Disallowed total:   INR 4205.00
 ```
 
 The exact summary is also printed by `app.py` after each run.
+
+## Vercel Deployment
+
+Deploy from the project root with the Vercel CLI:
+
+```bash
+npx vercel login
+npx vercel --prod
+```
+
+The deployed URL responds to `GET /api` with the calculated claim summary. Use `GET /api?download=1` to download a freshly generated `filled_travel_forms.xlsx` workbook.
+
+Vercel's runtime filesystem is temporary, so the hosted function returns the workbook as a download and does not persist it between requests. Tesseract must also be available in the deployment environment for image OCR; otherwise the existing email-text fallback is used.
 
 ## Tests
 
