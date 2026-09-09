@@ -6,6 +6,20 @@ The implementation is a lightweight web application backed by a script-friendly 
 
 For hosted testing, the repository includes a Vercel-compatible FastAPI application under `api/index.py`.
 
+## Live Demo
+
+Open the deployed application here:
+
+**[Launch Nortex Travel Expense Review](https://pack-copy.vercel.app/)**
+
+The hosted reviewer experience includes:
+
+- [Overview dashboard](https://pack-copy.vercel.app/)
+- [Expenses review](https://pack-copy.vercel.app/expenses)
+- [Approval workflow](https://pack-copy.vercel.app/approvals)
+- [Evidence packet](https://pack-copy.vercel.app/evidence)
+- [Download completed Excel form](https://pack-copy.vercel.app/download)
+
 ## Problem Solved
 
 The input packet represents one employee's business trip. The application removes the manual work of:
@@ -143,11 +157,17 @@ The tests cover the policy-based claim totals and successful workbook generation
 
 ## Walkthrough Video
 
-The repository includes a short visual walkthrough and narration guide:
+Watch the UI-focused walkthrough:
 
-- `project_walkthrough.mp4`
-- `web_ui_walkthrough.mp4`
-- `WALKTHROUGH_SCRIPT.md`
+**[Download Web UI Walkthrough](web_ui_walkthrough.mp4)**
+
+The walkthrough demonstrates the actual reviewer experience: dashboard totals, expense evidence, pending approval actions, manager approval, HOD unlock, and the evidence view.
+
+Additional project overview:
+
+- [Download Project Overview Video](project_walkthrough.mp4)
+- [Read the Walkthrough Script](WALKTHROUGH_SCRIPT.md)
+
 
 ## Design Decisions And Assumptions
 
